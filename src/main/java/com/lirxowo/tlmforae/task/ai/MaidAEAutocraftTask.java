@@ -1,12 +1,12 @@
 package com.lirxowo.tlmforae.task.ai;
 
+import appeng.api.implementations.blockentities.IWirelessAccessPoint;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.IGridNode;
 import appeng.api.networking.crafting.CalculationStrategy;
 import appeng.api.networking.crafting.ICraftingPlan;
 import appeng.api.networking.crafting.ICraftingSimulationRequester;
 import appeng.api.networking.crafting.ICraftingSubmitResult;
-import appeng.api.implementations.blockentities.IWirelessAccessPoint;
 import appeng.api.networking.security.IActionHost;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEItemKey;
@@ -19,6 +19,7 @@ import appeng.parts.reporting.ItemTerminalPart;
 import appeng.util.Platform;
 import com.github.tartaricacid.touhoulittlemaid.entity.ai.brain.task.MaidCheckRateTask;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.github.tartaricacid.touhoulittlemaid.entity.passive.MaidPathFindingBFS;
 import com.google.common.collect.ImmutableMap;
 import com.lirxowo.tlmforae.init.ModTaskData;
 import com.lirxowo.tlmforae.task.TaskAEAutocraft;
@@ -32,9 +33,12 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.memory.MemoryStatus;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
 
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -162,21 +166,65 @@ public class MaidAEAutocraftTask extends MaidCheckRateTask {
 
     private Optional<CraftTarget> findNearbyTarget(ServerLevel level, EntityMaid maid, AEAutocraftConfig config) {
         AABB box = maid.searchDimension();
-        return BlockPos.betweenClosedStream(
-                        (int) Math.floor(box.minX),
-                        (int) Math.floor(box.minY),
-                        (int) Math.floor(box.minZ),
-                        (int) Math.floor(box.maxX),
-                        (int) Math.floor(box.maxY),
-                        (int) Math.floor(box.maxZ))
-                .map(BlockPos::immutable)
-                .map(pos -> createTarget(level, pos))
-                .filter(Optional::isPresent)
-                .map(Optional::get)
-                .map(target -> createCraftTarget(target, config))
-                .filter(Optional::isPresent)
-                .map(Optional::get)
-                .min(Comparator.comparingDouble(craftTarget -> craftTarget.target().pos().distSqr(maid.blockPosition())));
+        List<CraftTarget> candidates = new ArrayList<>();
+        forEachBlockEntityInBox(level, box, blockEntity -> createTarget(blockEntity)
+                .filter(target -> isNearbyTargetCandidate(maid, box, target))
+                .flatMap(target -> createCraftTarget(target, config))
+                .ifPresent(candidates::add));
+        if (candidates.isEmpty()) {
+            return Optional.empty();
+        }
+
+        BlockPos center = maid.hasRestriction() ? maid.getRestrictCenter() : maid.blockPosition();
+        float horizontalRange = (float) Math.max(box.maxX - center.getX(), center.getX() - box.minX);
+        int verticalRange = (int) Math.ceil(Math.max(box.maxY - center.getY(), center.getY() - box.minY));
+        MaidPathFindingBFS pathFinding = new MaidPathFindingBFS(
+                maid.getNavigation().getNodeEvaluator(),
+                level,
+                maid,
+                horizontalRange,
+                verticalRange);
+        try {
+            return candidates.stream()
+                    .filter(craftTarget -> canReachTarget(pathFinding, craftTarget.target().pos()))
+                    .min(Comparator.comparingDouble(craftTarget -> craftTarget.target().pos().distSqr(maid.blockPosition())));
+        } finally {
+            pathFinding.finish();
+        }
+    }
+
+    private boolean canReachTarget(MaidPathFindingBFS pathFinding, BlockPos pos) {
+        if (pathFinding.canPathReach(pos)) {
+            return true;
+        }
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            if (pathFinding.canPathReach(pos.relative(direction))) {
+                return true;
+            }
+        }
+        return pathFinding.canPathReach(pos.above());
+    }
+
+    private void forEachBlockEntityInBox(ServerLevel level, AABB box, java.util.function.Consumer<BlockEntity> consumer) {
+        int minChunkX = ((int) Math.floor(box.minX)) >> 4;
+        int maxChunkX = ((int) Math.floor(box.maxX)) >> 4;
+        int minChunkZ = ((int) Math.floor(box.minZ)) >> 4;
+        int maxChunkZ = ((int) Math.floor(box.maxZ)) >> 4;
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+                if (chunk == null) {
+                    continue;
+                }
+                chunk.getBlockEntities().values().forEach(consumer);
+            }
+        }
+    }
+
+    private boolean isNearbyTargetCandidate(EntityMaid maid, AABB box, TerminalTarget target) {
+        BlockPos pos = target.pos();
+        return box.contains(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5)
+                && maid.isWithinRestriction(pos);
     }
 
     private Optional<CraftTarget> createCraftTarget(TerminalTarget target, AEAutocraftConfig config) {
@@ -186,8 +234,8 @@ public class MaidAEAutocraftTask extends MaidCheckRateTask {
                 .map(request -> new CraftTarget(target, request));
     }
 
-    private Optional<TerminalTarget> createTarget(ServerLevel level, BlockPos pos) {
-        BlockEntity blockEntity = level.getBlockEntity(pos);
+    private Optional<TerminalTarget> createTarget(BlockEntity blockEntity) {
+        BlockPos pos = blockEntity.getBlockPos();
         if (blockEntity instanceof WirelessAccessPointBlockEntity wireless && wireless.isActive()) {
             IGrid grid = wireless.getGrid();
             if (grid != null) {
