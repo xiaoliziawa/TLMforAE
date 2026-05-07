@@ -1,0 +1,13 @@
+{
+  "task.tlmforae.ae_autocraft": "AE2 Autocraft",
+  "task.tlmforae.ae_autocraft.desc": "Watches nearby AE networks and requests autocrafting when stock is below the threshold.",
+  "gui.tlmforae.ae_autocraft_config": "AE2 Autocraft Settings",
+  "gui.tlmforae.ae_autocraft_config.target": "Target Item",
+  "gui.tlmforae.ae_autocraft_config.target.short": "Item",
+  "gui.tlmforae.ae_autocraft_config.target.empty": "Pick up an item with the cursor and click here to set the target; click empty-handed to clear.",
+  "gui.tlmforae.ae_autocraft_config.amount": "Craft Amount",
+  "gui.tlmforae.ae_autocraft_config.amount.short": "Amount",
+  "gui.tlmforae.ae_autocraft_config.threshold": "Stock Limit",
+  "gui.tlmforae.ae_autocraft_config.threshold.short": "Limit",
+  "gui.tlmforae.ae_autocraft_config.save": "Save"
+}

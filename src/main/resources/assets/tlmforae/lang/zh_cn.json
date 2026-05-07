@@ -1,0 +1,13 @@
+{
+  "task.tlmforae.ae_autocraft": "AE2自动合成",
+  "task.tlmforae.ae_autocraft.desc": "监控附近AE网络库存，低于阈值时请求自动合成。",
+  "gui.tlmforae.ae_autocraft_config": "AE2自动合成设置",
+  "gui.tlmforae.ae_autocraft_config.target": "目标物品",
+  "gui.tlmforae.ae_autocraft_config.target.short": "物品",
+  "gui.tlmforae.ae_autocraft_config.target.empty": "用鼠标拿起物品后点击这里设置目标；空手点击清除。",
+  "gui.tlmforae.ae_autocraft_config.amount": "合成数量",
+  "gui.tlmforae.ae_autocraft_config.amount.short": "数量",
+  "gui.tlmforae.ae_autocraft_config.threshold": "库存阈值",
+  "gui.tlmforae.ae_autocraft_config.threshold.short": "阈值",
+  "gui.tlmforae.ae_autocraft_config.save": "保存"
+}
