@@ -49,6 +49,7 @@ public class MaidAEAutocraftTask extends MaidCheckRateTask {
     private Future<ICraftingPlan> pendingPlan;
     private TerminalTarget pendingTarget;
     private AEAutocraftConfig.Request pendingRequest;
+    private CraftTarget cachedCraftTarget;
 
     public MaidAEAutocraftTask(float speed, int closeEnoughDist) {
         super(ImmutableMap.of(MemoryModuleType.WALK_TARGET, MemoryStatus.VALUE_ABSENT));
@@ -78,39 +79,39 @@ public class MaidAEAutocraftTask extends MaidCheckRateTask {
         if (craftTarget.isEmpty()) {
             return false;
         }
-        TerminalTarget target = craftTarget.get().target();
+        this.cachedCraftTarget = craftTarget.get();
+        TerminalTarget target = this.cachedCraftTarget.target();
         if (!target.requiresProximity()) {
-            return shouldCraft(target.grid(), craftTarget.get().request());
+            return true;
         }
         BlockPos pos = target.pos();
         if (!maid.isWithinRestriction(pos)) {
+            this.cachedCraftTarget = null;
             return false;
         }
         if (pos.distToCenterSqr(maid.position()) <= this.closeEnoughDist * this.closeEnoughDist) {
-            return shouldCraft(target.grid(), craftTarget.get().request());
+            return true;
         }
         if (maid.canBrainMoving()) {
             BehaviorUtils.setWalkAndLookTargetMemories(maid, pos, this.speed, this.closeEnoughDist);
             this.setNextCheckTickCount(5);
         }
+        this.cachedCraftTarget = null;
         return false;
     }
 
     @Override
     protected void start(ServerLevel level, EntityMaid maid, long gameTime) {
-        AEAutocraftConfig config = getConfig(maid);
-        if (!config.isConfigured()) {
+        CraftTarget craftTarget = this.cachedCraftTarget;
+        this.cachedCraftTarget = null;
+        if (craftTarget == null) {
             return;
         }
-        findTarget(level, maid, config).ifPresent(craftTarget -> {
-            TerminalTarget target = craftTarget.target();
-            if (!target.requiresProximity() || target.pos().distToCenterSqr(maid.position()) <= this.closeEnoughDist * this.closeEnoughDist) {
-                submitCraft(level, target, craftTarget.request());
-                if (target.requiresProximity()) {
-                    maid.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, new BlockPosTracker(target.pos()));
-                }
-            }
-        });
+        TerminalTarget target = craftTarget.target();
+        submitCraft(level, target, craftTarget.request());
+        if (target.requiresProximity()) {
+            maid.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, new BlockPosTracker(target.pos()));
+        }
     }
 
     private AEAutocraftConfig getConfig(EntityMaid maid) {
@@ -175,7 +176,10 @@ public class MaidAEAutocraftTask extends MaidCheckRateTask {
             return Optional.empty();
         }
 
-        BlockPos center = maid.hasRestriction() ? maid.getRestrictCenter() : maid.blockPosition();
+        BlockPos maidPos = maid.blockPosition();
+        candidates.sort(Comparator.comparingDouble(ct -> ct.target().pos().distSqr(maidPos)));
+
+        BlockPos center = maid.hasRestriction() ? maid.getRestrictCenter() : maidPos;
         float horizontalRange = (float) Math.max(box.maxX - center.getX(), center.getX() - box.minX);
         int verticalRange = (int) Math.ceil(Math.max(box.maxY - center.getY(), center.getY() - box.minY));
         MaidPathFindingBFS pathFinding = new MaidPathFindingBFS(
@@ -187,7 +191,7 @@ public class MaidAEAutocraftTask extends MaidCheckRateTask {
         try {
             return candidates.stream()
                     .filter(craftTarget -> canReachTarget(pathFinding, craftTarget.target().pos()))
-                    .min(Comparator.comparingDouble(craftTarget -> craftTarget.target().pos().distSqr(maid.blockPosition())));
+                    .findFirst();
         } finally {
             pathFinding.finish();
         }
